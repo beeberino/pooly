@@ -56,7 +56,7 @@ defmodule Pooly.PoolServer do
   end
 
   def init([], state) do
-    send(self, :start_worker_supervisor)
+    send(self(), :start_worker_supervisor)
     {:ok, state}
   end
 
@@ -66,18 +66,6 @@ defmodule Pooly.PoolServer do
 
   def handle_call(:status, _from, %{workers: workers, monitors: monitors} = state) do
     {:reply, {state_name(state), length(workers), :ets.info(monitors, :size)}, state}
-  end
-
-  def handle_cast({:checkin, worker}, %{monitors: monitors} = state) do
-    case :ets.lookup(monitors, worker) do
-      [{pid, ref}] ->
-        true = Process.demonitor(ref)
-        true = :ets.delete(monitors, pid)
-        new_state = handle_checkin(pid, state)
-        {:noreply, new_state}
-      [] ->
-        {:noreply, state}
-    end
   end
 
   def handle_call({:checkout, block}, {from_pid, _ref} = from, state) do
@@ -108,6 +96,18 @@ defmodule Pooly.PoolServer do
     end
   end
 
+  def handle_cast({:checkin, worker}, %{monitors: monitors} = state) do
+    case :ets.lookup(monitors, worker) do
+      [{pid, ref}] ->
+        true = Process.demonitor(ref)
+        true = :ets.delete(monitors, pid)
+        new_state = handle_checkin(pid, state)
+        {:noreply, new_state}
+      [] ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(:start_worker_supervisor, state = %{pool_sup: pool_sup, name: name, mfa: mfa, size: size}) do
     {:ok, worker_sup} = Supervisor.start_child(pool_sup, supervisor_spec(name, mfa))
     workers = prepopulate(size, worker_sup)
@@ -118,7 +118,7 @@ defmodule Pooly.PoolServer do
     {:stop, reason, state}
   end
 
-  def handle_info({:EXIT, pid, _reason}, state = %{monitors: monitors, workers: workers, worker_sup: worker_sup}) do
+  def handle_info({:EXIT, pid, _reason}, state = %{monitors: monitors, workers: _workers, worker_sup: _worker_sup}) do
     case :ets.lookup(monitors, pid) do
       [{pid, ref}] ->
         true = Process.demonitor(ref)
@@ -153,7 +153,7 @@ defmodule Pooly.PoolServer do
 
   defp supervisor_spec(name, mfa) do
     opts = [id: name <> "WorkerSupervisor", restart: :temporary]
-    supervisor(Pooly.WorkerSupervisor, [self, mfa], opts)
+    supervisor(Pooly.WorkerSupervisor, [self(), mfa], opts)
   end
 
   defp prepopulate(size, sup) do
@@ -201,7 +201,7 @@ defmodule Pooly.PoolServer do
     end
   end
 
-  defp handle_worker_exit(pid, state) do
+  defp handle_worker_exit(_pid, state) do
     %{
       worker_sup: worker_sup,
       workers: workers,
